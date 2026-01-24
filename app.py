@@ -38,8 +38,8 @@ except Exception as e:
 menu = st.sidebar.selectbox("選擇功能", ["消費者保固登錄", "店家核銷專區"])
 
 if menu == "消費者保固登錄":
-    st.title("🛡️ Orbiloc 守護者 - 保固登錄")
-    st.info("購買一年內，享免費換電池及維護一次。")
+    st.title("🛡️ Orbiloc 守護者外出燈 - 線上保固登錄")
+    st.info("購買一年內，享免費換電池及維護一次（需回原購買店家使用）。")
 
     with st.form("register_form"):
         name = st.text_input("姓名")
