@@ -24,7 +24,7 @@ except:
 SHOP_LIST = [
     "Bluebulous 布魯樂斯毛孩專業用品",
     "Caldo Pets 卡朵毛孩生活",
-    "Fluffy Pet|犬貓生活選品",
+    "Fluffy Pet | 犬貓生活選品",
     "好多毛寵物美容",
     "Kodomou 毛孩選物所",
     "趴趴狗寵物精品",
