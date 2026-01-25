@@ -10,7 +10,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 # --- 設定頁面資訊 ---
-st.set_page_config(page_title="Orbiloc 守護者外出燈保固註冊系統", layout="centered")
+st.set_page_config(page_title="Orbiloc 守護者外出燈保固註冊系統", page_icon="🛡️", layout="centered")
 
 # --- 初始化 Session State ---
 if 'cart' not in st.session_state:
@@ -154,7 +154,7 @@ if menu == "消費者保固登錄":
         
         系統已發送一封確認信至您的 Email 信箱（若未收到請檢查垃圾郵件夾）。
         
-        **【如何兌換免費維護？】** 在購買日起算一年內，攜帶您的外出燈前往 **{st.session_state.get('last_shop_name', '原購買通路')}**，
+        **【如何兌換免費維護？】** 請於方便的時間，攜帶您的外出燈前往 **{st.session_state.get('last_shop_name', '原購買通路')}**，
         告知店員您的 **電話號碼** 即可進行核銷與維護。
         
         感謝您選擇 Orbiloc 守護毛孩的安全！
@@ -243,8 +243,11 @@ if menu == "消費者保固登錄":
                         df = pd.DataFrame(data)
                         df.columns = [c.strip() for c in df.columns]
                         if not df.empty and '電話' in df.columns and '發票' in df.columns:
-                            # 修正：先清理資料庫的電話欄位，再比對，避免因 ' 號導致比對失敗
+                            # 修正：先清理資料庫的電話欄位，再比對
                             df['clean_phone'] = df['電話'].astype(str).str.replace("'", "", regex=False).str.strip()
+                            # 補 0 邏輯：如果變成9碼，前面加0 (針對重複檢查比對)
+                            df['clean_phone'] = df['clean_phone'].apply(lambda x: "0" + x if len(x) == 9 and x.isdigit() else x)
+                            
                             input_phone = str(phone).strip()
                             
                             duplicate_check = df[
@@ -257,7 +260,7 @@ if menu == "消費者保固登錄":
                     if is_duplicate:
                         st.warning("⚠️ 此發票號碼與電話已登記過，請勿重複送出。")
                     else:
-                        # 修正：寫入時不加單引號，避免資料格式混亂
+                        # 寫入時不加單引號
                         new_row = [
                             name, str(phone), email, invoice, shop_name, 
                             product_detail_str, str(purchase_date), 
@@ -276,8 +279,8 @@ if menu == "消費者保固登錄":
                         
                         # --- 更新 Session State 觸發畫面跳轉 ---
                         st.session_state['form_submitted'] = True
-                        st.session_state['last_shop_name'] = shop_name # 記住店名給成功頁面用
-                        st.rerun() # 強制重新整理以顯示成功畫面
+                        st.session_state['last_shop_name'] = shop_name 
+                        st.rerun()
 
                 except Exception as e:
                     st.error(f"系統寫入錯誤：{e}")
@@ -327,9 +330,12 @@ elif menu == "店家核銷專區":
                     if '電話' not in df.columns:
                         st.error("資料庫格式錯誤：缺少「電話」欄位。")
                     else:
-                        # 修正：搜尋邏輯強化
-                        # 1. 轉字串 2. 移除單引號 3. 移除空格
-                        df['clean_phone'] = df['電話'].astype(str).str.replace("'", "", regex=False).str.strip()
+                        # --- 核心修正：讀取時強制補 0 ---
+                        # 1. 轉字串 2. 移除小數點(浮點數轉字串會有.0) 3. 移除單引號 4. 移除空格
+                        df['clean_phone'] = df['電話'].astype(str).str.replace(r'\.0$', '', regex=True).str.replace("'", "", regex=False).str.strip()
+                        # 5. 若長度為 9 且為純數字，補回開頭的 0
+                        df['clean_phone'] = df['clean_phone'].apply(lambda x: "0" + x if len(x) == 9 and x.isdigit() else x)
+                        
                         input_phone = str(search_phone).strip()
 
                         customers = df[
@@ -338,7 +344,6 @@ elif menu == "店家核銷專區":
                         ]
                         
                         if customers.empty:
-                            # 嘗試搜尋全部通路，看是否跑錯店
                             check_all = df[df['clean_phone'] == input_phone]
                             if not check_all.empty:
                                  st.warning("⚠️ 查無此人於本店的購買紀錄（該客戶可能是在其他通路購買）。")
@@ -366,9 +371,9 @@ elif menu == "店家核銷專區":
                                                     sheet.update_cell(row_idx, 9, "Yes")
                                                     sheet.update_cell(row_idx, 10, login_shop)
                                                     sheet.update_cell(row_idx, 11, str(datetime.now().date()))
-                                                    st.toast("✅ 核銷成功！資料已更新") # 新增 Toast 通知
+                                                    st.toast("✅ 核銷成功！資料已更新")
                                                     st.balloons()
-                                                    st.rerun() # 強制重整以更新狀態
+                                                    st.rerun()
                                                 except Exception as e:
                                                     st.error(f"核銷失敗：{e}")
 
@@ -382,8 +387,15 @@ elif menu == "店家核銷專區":
                 else:
                     df = pd.DataFrame(data)
                     df.columns = [c.strip() for c in df.columns]
-                    if '購買通路名稱' in df.columns:
+                    
+                    if '購買通路名稱' in df.columns and '電話' in df.columns:
+                        
+                        # --- 核心修正：顯示時強制補 0 ---
+                        df['電話'] = df['電話'].astype(str).str.replace(r'\.0$', '', regex=True).str.replace("'", "", regex=False).str.strip()
+                        df['電話'] = df['電話'].apply(lambda x: "0" + x if len(x) == 9 and x.isdigit() else x)
+                        
                         my_shop_data = df[df['購買通路名稱'] == login_shop]
+                        
                         if my_shop_data.empty:
                             st.info("目前尚無消費者登記於貴店名下。")
                         else:
@@ -392,4 +404,4 @@ elif menu == "店家核銷專區":
                             st.dataframe(my_shop_data[final_cols])
                             st.caption(f"共 {len(my_shop_data)} 筆資料")
                     else:
-                        st.error("資料庫讀取錯誤。")
+                        st.error("資料庫讀取錯誤：缺少「電話」或「購買通路名稱」欄位。")
