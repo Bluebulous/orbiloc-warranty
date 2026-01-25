@@ -115,7 +115,7 @@ if menu == "消費者保固登錄":
         st.success(f"已加入：{selected_prod} x{selected_qty}")
 
     if st.session_state['cart']:
-        st.markdown("**🛒 目前已選購商品：**")
+        st.markdown("**🛒 目前已登錄商品：**")
         for i, item in enumerate(st.session_state['cart']):
             st.text(f"{i+1}. {item}")
         
