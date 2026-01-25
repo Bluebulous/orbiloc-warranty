@@ -10,7 +10,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 # --- 設定頁面資訊 ---
-st.set_page_config(page_title="Orbiloc 守護者外出燈保固註冊系統", page_icon="🛡️", layout="centered")
+st.set_page_config(page_title="Orbiloc 守護者外出燈保固註冊系統", layout="centered")
 
 # --- 初始化 Session State ---
 if 'cart' not in st.session_state:
@@ -78,19 +78,17 @@ def send_notification_email(to_email, customer_name, shop_name, product_details)
     bcc_email = os.environ.get("BCC_EMAIL")
 
     if not gmail_user or not gmail_password:
-        print("Email 設定缺失，無法寄信")
-        return False
+        return False, "Render 環境變數 MAIL_USER 或 MAIL_PASSWORD 未設定"
 
     msg = MIMEMultipart()
     msg['From'] = f"Orbiloc Taiwan <{gmail_user}>"
     msg['To'] = to_email
     msg['Subject'] = "【保固登錄成功】Orbiloc 守護者外出燈"
 
-    # 如果有設定 BCC，加入 Header (雖然 SMTP protocol 才是真的寄送，但加在 Header 比較規範)
+    # 如果有設定 BCC，加入 Header
+    recipients = [to_email]
     if bcc_email:
-        recipients = [to_email, bcc_email]
-    else:
-        recipients = [to_email]
+        recipients.append(bcc_email)
 
     body = f"""
     Dear {customer_name},
@@ -121,10 +119,9 @@ def send_notification_email(to_email, customer_name, shop_name, product_details)
         server.login(gmail_user, gmail_password)
         server.sendmail(gmail_user, recipients, msg.as_string())
         server.quit()
-        return True
+        return True, "發送成功"
     except Exception as e:
-        print(f"Email 發送失敗: {e}")
-        return False
+        return False, f"Email 發送失敗: {str(e)}"
 
 try:
     sheet = get_google_sheet()
@@ -145,12 +142,19 @@ if menu == "消費者保固登錄":
         st.balloons()
         st.success("🎉 保固登錄成功！")
         
+        # 顯示 Email 發送狀態回報
+        email_status = st.session_state.get('email_status', '')
+        if email_status and "失敗" in email_status:
+            st.error(f"⚠️ 資料已存檔，但確認信發送失敗。原因：{email_status}")
+        elif email_status and "未設定" in email_status:
+            st.warning("⚠️ 資料已存檔，但未設定 Email 帳號，故未發送確認信。")
+        
         st.markdown(f"""
         ### 您的資料已成功建檔
         
         系統已發送一封確認信至您的 Email 信箱（若未收到請檢查垃圾郵件夾）。
         
-        **【如何兌換免費維護？】** 請於方便的時間，攜帶您的外出燈前往 **{st.session_state.get('last_shop_name', '原購買通路')}**，
+        **【如何兌換免費維護？】** 在購買日起算一年內，攜帶您的外出燈前往 **{st.session_state.get('last_shop_name', '原購買通路')}**，
         告知店員您的 **電話號碼** 即可進行核銷與維護。
         
         感謝您選擇 Orbiloc 守護毛孩的安全！
@@ -160,6 +164,7 @@ if menu == "消費者保固登錄":
         if st.button("回首頁 (登錄下一筆)"):
             st.session_state['form_submitted'] = False
             st.session_state['cart'] = []
+            st.session_state['email_status'] = '' # 清除狀態
             st.rerun()
             
     else:
@@ -216,7 +221,7 @@ if menu == "消費者保固登錄":
         st.subheader("2. 填寫保固資訊（請正確填寫資料，以免影響保固資格")
         
         name = st.text_input("姓名")
-        phone = st.text_input("電話 (作為查詢依據)", placeholder="09xxxxxxxx")
+        phone = st.text_input("電話 (數字請連號輸入，勿輸入任何符號)", placeholder="09xxxxxxxx")
         email = st.text_input("Email (將寄送確認信)", placeholder="example@email.com")
         invoice = st.text_input("發票/收據/訂單編號")
         shop_name = st.selectbox("購買通路名稱 (請務必正確選擇)", SHOP_LIST)
@@ -238,8 +243,12 @@ if menu == "消費者保固登錄":
                         df = pd.DataFrame(data)
                         df.columns = [c.strip() for c in df.columns]
                         if not df.empty and '電話' in df.columns and '發票' in df.columns:
+                            # 修正：先清理資料庫的電話欄位，再比對，避免因 ' 號導致比對失敗
+                            df['clean_phone'] = df['電話'].astype(str).str.replace("'", "", regex=False).str.strip()
+                            input_phone = str(phone).strip()
+                            
                             duplicate_check = df[
-                                (df['電話'].astype(str) == str(phone)) & 
+                                (df['clean_phone'] == input_phone) & 
                                 (df['發票'].astype(str) == str(invoice))
                             ]
                             if not duplicate_check.empty:
@@ -248,17 +257,22 @@ if menu == "消費者保固登錄":
                     if is_duplicate:
                         st.warning("⚠️ 此發票號碼與電話已登記過，請勿重複送出。")
                     else:
+                        # 修正：寫入時不加單引號，避免資料格式混亂
                         new_row = [
-                            name, "'" + str(phone), email, invoice, shop_name, 
+                            name, str(phone), email, invoice, shop_name, 
                             product_detail_str, str(purchase_date), 
                             str(datetime.now().date()), "No", "", ""
                         ]
                         sheet.append_row(new_row)
                         
                         # --- 寄送 Email ---
+                        email_msg = ""
                         if email:
                             with st.spinner("資料儲存成功，正在發送確認信..."):
-                                send_notification_email(email, name, shop_name, product_detail_str)
+                                success, msg = send_notification_email(email, name, shop_name, product_detail_str)
+                                st.session_state['email_status'] = msg
+                        else:
+                            st.session_state['email_status'] = "未填寫Email"
                         
                         # --- 更新 Session State 觸發畫面跳轉 ---
                         st.session_state['form_submitted'] = True
@@ -313,14 +327,19 @@ elif menu == "店家核銷專區":
                     if '電話' not in df.columns:
                         st.error("資料庫格式錯誤：缺少「電話」欄位。")
                     else:
-                        df['電話'] = df['電話'].astype(str)
+                        # 修正：搜尋邏輯強化
+                        # 1. 轉字串 2. 移除單引號 3. 移除空格
+                        df['clean_phone'] = df['電話'].astype(str).str.replace("'", "", regex=False).str.strip()
+                        input_phone = str(search_phone).strip()
+
                         customers = df[
-                            (df['電話'] == search_phone) & 
+                            (df['clean_phone'] == input_phone) & 
                             (df['購買通路名稱'] == login_shop)
                         ]
                         
                         if customers.empty:
-                            check_all = df[df['電話'] == search_phone]
+                            # 嘗試搜尋全部通路，看是否跑錯店
+                            check_all = df[df['clean_phone'] == input_phone]
                             if not check_all.empty:
                                  st.warning("⚠️ 查無此人於本店的購買紀錄（該客戶可能是在其他通路購買）。")
                             else:
@@ -342,13 +361,16 @@ elif menu == "店家核銷專區":
                                         else:
                                             unique_key = f"btn_redeem_{index}"
                                             if st.button("🛠️ 執行核銷", key=unique_key):
-                                                row_idx = index + 2
-                                                sheet.update_cell(row_idx, 9, "Yes")
-                                                sheet.update_cell(row_idx, 10, login_shop)
-                                                sheet.update_cell(row_idx, 11, str(datetime.now().date()))
-                                                st.balloons()
-                                                st.success("核銷成功！")
-                                                st.rerun()
+                                                try:
+                                                    row_idx = index + 2
+                                                    sheet.update_cell(row_idx, 9, "Yes")
+                                                    sheet.update_cell(row_idx, 10, login_shop)
+                                                    sheet.update_cell(row_idx, 11, str(datetime.now().date()))
+                                                    st.toast("✅ 核銷成功！資料已更新") # 新增 Toast 通知
+                                                    st.balloons()
+                                                    st.rerun() # 強制重整以更新狀態
+                                                except Exception as e:
+                                                    st.error(f"核銷失敗：{e}")
 
         # === 分頁 2: 本店歷史紀錄 ===
         with tab2:
