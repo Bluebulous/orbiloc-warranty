@@ -15,9 +15,14 @@ st.set_page_config(page_title="Orbiloc 守護者外出燈保固註冊系統", pa
 # --- 初始化 Session State ---
 if 'cart' not in st.session_state:
     st.session_state['cart'] = []
-# 新增一個狀態來控制是否顯示成功畫面
 if 'form_submitted' not in st.session_state:
     st.session_state['form_submitted'] = False
+
+# [修正點 1] 初始化搜尋狀態，確保核銷時不會跳掉
+if 'has_searched' not in st.session_state:
+    st.session_state['has_searched'] = False
+if 'search_phone_number' not in st.session_state:
+    st.session_state['search_phone_number'] = ""
 
 # --- 1. 顯示 Logo ---
 try:
@@ -85,7 +90,6 @@ def send_notification_email(to_email, customer_name, shop_name, product_details)
     msg['To'] = to_email
     msg['Subject'] = "【保固登錄成功】Orbiloc 守護者外出燈"
 
-    # 如果有設定 BCC，加入 Header
     recipients = [to_email]
     if bcc_email:
         recipients.append(bcc_email)
@@ -137,12 +141,10 @@ menu = st.sidebar.selectbox("選擇功能", ["消費者保固登錄", "店家核
 # ==========================================
 if menu == "消費者保固登錄":
     
-    # 判斷是否已經成功提交，如果是，顯示成功畫面
     if st.session_state['form_submitted']:
         st.balloons()
         st.success("🎉 保固登錄成功！")
         
-        # 顯示 Email 發送狀態回報
         email_status = st.session_state.get('email_status', '')
         if email_status and "失敗" in email_status:
             st.error(f"⚠️ 資料已存檔，但確認信發送失敗。原因：{email_status}")
@@ -164,11 +166,10 @@ if menu == "消費者保固登錄":
         if st.button("回首頁 (登錄下一筆)"):
             st.session_state['form_submitted'] = False
             st.session_state['cart'] = []
-            st.session_state['email_status'] = '' # 清除狀態
+            st.session_state['email_status'] = ''
             st.rerun()
             
     else:
-        # --- 顯示原本的表單 ---
         st.title("守護者外出燈保固登錄")
         
         st.markdown("""
@@ -176,9 +177,9 @@ if menu == "消費者保固登錄":
         凡購買 Orbiloc 守護者外出燈，在正常使用下（排除人為因素、寵物啃咬及不當拆解），我們提供長達三年的安心保固服務。
 
         ### 【登錄享好禮：免費電池維護】
-        立即掃描 QR Code 完成線上保固登錄，即加贈 **「原廠電池＆防水圈維護服務」** 乙次。
+        完成線上保固登錄，即加贈 **「原廠電池＆防水圈維護服務」** 乙次。
         
-        **兌換方式：** 請攜帶您的 Orbiloc 外出燈親臨原購買通路，提供「保固登錄之電話號碼」供門市人員查詢確認後，即可現場免費兌換維護。
+        **兌換方式：** 在購買日起算一年內，請攜帶您的 Orbiloc 外出燈親臨原購買通路，提供「保固登錄之電話號碼」供門市人員查詢確認後，即可現場免費兌換維護。
         
         **貼心提醒：** 本服務採現場更換耗材制，恕不提供寄送服務，亦不可跨通路兌換*。  
         <small>*若原通路已停業或有其他特殊狀況，請洽總代理 LINE 客服 @bluebulous，我們將協助引導您至其他服務據點。</small>
@@ -186,7 +187,6 @@ if menu == "消費者保固登錄":
         
         st.divider()
 
-        # --- 步驟 1: 建立購買清單 ---
         st.subheader("1. 登錄產品清單")
         st.caption("若購買多樣商品，請選取後點擊「加入清單」。")
         
@@ -217,7 +217,6 @@ if menu == "消費者保固登錄":
 
         st.divider()
 
-        # --- 步驟 2: 填寫保固資訊 ---
         st.subheader("2. 填寫保固資訊（請正確填寫資料，以免影響保固資格")
         
         name = st.text_input("姓名")
@@ -237,15 +236,13 @@ if menu == "消費者保固登錄":
                     product_detail_str = ", ".join(st.session_state['cart'])
                     data = sheet.get_all_records()
                     
-                    # 檢查重複
                     is_duplicate = False
                     if data:
                         df = pd.DataFrame(data)
                         df.columns = [c.strip() for c in df.columns]
                         if not df.empty and '電話' in df.columns and '發票' in df.columns:
-                            # 修正：先清理資料庫的電話欄位，再比對
                             df['clean_phone'] = df['電話'].astype(str).str.replace("'", "", regex=False).str.strip()
-                            # 補 0 邏輯：如果變成9碼，前面加0 (針對重複檢查比對)
+                            # 補 0
                             df['clean_phone'] = df['clean_phone'].apply(lambda x: "0" + x if len(x) == 9 and x.isdigit() else x)
                             
                             input_phone = str(phone).strip()
@@ -260,7 +257,6 @@ if menu == "消費者保固登錄":
                     if is_duplicate:
                         st.warning("⚠️ 此發票號碼與電話已登記過，請勿重複送出。")
                     else:
-                        # 寫入時不加單引號
                         new_row = [
                             name, str(phone), email, invoice, shop_name, 
                             product_detail_str, str(purchase_date), 
@@ -268,7 +264,6 @@ if menu == "消費者保固登錄":
                         ]
                         sheet.append_row(new_row)
                         
-                        # --- 寄送 Email ---
                         email_msg = ""
                         if email:
                             with st.spinner("資料儲存成功，正在發送確認信..."):
@@ -277,7 +272,6 @@ if menu == "消費者保固登錄":
                         else:
                             st.session_state['email_status'] = "未填寫Email"
                         
-                        # --- 更新 Session State 觸發畫面跳轉 ---
                         st.session_state['form_submitted'] = True
                         st.session_state['last_shop_name'] = shop_name 
                         st.rerun()
@@ -317,9 +311,18 @@ elif menu == "店家核銷專區":
             st.subheader(f"📍 {login_shop} - 核銷作業")
             st.error("⚠️ 請詳細確認【發票／訂單號碼】以及【產品明細】是否吻合以進行核銷") 
             
-            search_phone = st.text_input("輸入消費者電話", key="search_phone")
+            # [修正點 2] 輸入框的值要與 Session State 綁定，防止重整後清空
+            phone_input = st.text_input("輸入消費者電話", key="phone_input")
             
+            # [修正點 3] 按下搜尋按鈕時，更新狀態
             if st.button("搜尋資料"):
+                st.session_state['has_searched'] = True
+                st.session_state['search_phone_number'] = phone_input
+            
+            # [修正點 4] 只要狀態是 True，就顯示搜尋結果 (不管剛才按的是搜尋還是核銷)
+            if st.session_state['has_searched'] and st.session_state['search_phone_number']:
+                
+                # 重新抓取資料
                 data = sheet.get_all_records()
                 if not data:
                     st.warning("目前資料庫為空。")
@@ -330,13 +333,12 @@ elif menu == "店家核銷專區":
                     if '電話' not in df.columns:
                         st.error("資料庫格式錯誤：缺少「電話」欄位。")
                     else:
-                        # --- 核心修正：讀取時強制補 0 ---
-                        # 1. 轉字串 2. 移除小數點(浮點數轉字串會有.0) 3. 移除單引號 4. 移除空格
+                        # 清理與補0
                         df['clean_phone'] = df['電話'].astype(str).str.replace(r'\.0$', '', regex=True).str.replace("'", "", regex=False).str.strip()
-                        # 5. 若長度為 9 且為純數字，補回開頭的 0
                         df['clean_phone'] = df['clean_phone'].apply(lambda x: "0" + x if len(x) == 9 and x.isdigit() else x)
                         
-                        input_phone = str(search_phone).strip()
+                        # 使用存起來的電話號碼來搜尋
+                        input_phone = str(st.session_state['search_phone_number']).strip()
 
                         customers = df[
                             (df['clean_phone'] == input_phone) & 
@@ -373,6 +375,7 @@ elif menu == "店家核銷專區":
                                                     sheet.update_cell(row_idx, 11, str(datetime.now().date()))
                                                     st.toast("✅ 核銷成功！資料已更新")
                                                     st.balloons()
+                                                    # 重整後，因為 has_searched 還是 True，所以會自動再次顯示已更新的資料
                                                     st.rerun()
                                                 except Exception as e:
                                                     st.error(f"核銷失敗：{e}")
@@ -390,7 +393,6 @@ elif menu == "店家核銷專區":
                     
                     if '購買通路名稱' in df.columns and '電話' in df.columns:
                         
-                        # --- 核心修正：顯示時強制補 0 ---
                         df['電話'] = df['電話'].astype(str).str.replace(r'\.0$', '', regex=True).str.replace("'", "", regex=False).str.strip()
                         df['電話'] = df['電話'].apply(lambda x: "0" + x if len(x) == 9 and x.isdigit() else x)
                         
