@@ -7,7 +7,7 @@ import os
 import json
 
 # --- 設定頁面資訊 ---
-st.set_page_config(page_title="Orbiloc 守護者外出燈保固註冊系統", page_icon="🛡️", layout="centered")
+st.set_page_config(page_title="Orbiloc 守護者外出燈保固註冊系統", layout="centered")
 
 # --- 初始化 Session State ---
 if 'cart' not in st.session_state:
@@ -96,9 +96,9 @@ if menu == "消費者保固登錄":
     
     st.divider()
 
-    # --- 步驟 1: 建立購買清單 ---
+    # --- 步驟 1: 登錄產品明細 ---
     st.subheader("1. 建立購買清單")
-    st.caption("若購買多樣商品，請選取後點擊「加入清單」。")
+    st.caption("若購買多樣外出燈，請選取後點擊「加入清單」。")
     
     c1, c2, c3 = st.columns([3, 1, 1])
     with c1:
@@ -128,7 +128,7 @@ if menu == "消費者保固登錄":
     st.divider()
 
     # --- 步驟 2: 填寫保固資訊 ---
-    st.subheader("2. 填寫保固資訊")
+    st.subheader("2. 填寫保固資訊（請正確填寫以下資訊，以避免資料不符影響保固資格")
     
     name = st.text_input("姓名")
     phone = st.text_input("電話 (作為查詢依據)", placeholder="09xxxxxxxx")
