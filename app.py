@@ -8,6 +8,7 @@ import json
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+import threading
 
 # --- 設定頁面資訊 ---
 st.set_page_config(page_title="Orbiloc 守護者外出燈保固註冊系統", layout="centered")
@@ -18,7 +19,7 @@ if 'cart' not in st.session_state:
 if 'form_submitted' not in st.session_state:
     st.session_state['form_submitted'] = False
 
-# [修正點 1] 初始化搜尋狀態
+# 初始化搜尋狀態
 if 'has_searched' not in st.session_state:
     st.session_state['has_searched'] = False
 if 'search_phone_number' not in st.session_state:
@@ -64,6 +65,7 @@ PRODUCT_LIST = [
 # 函式區：Google Sheet & Email
 # ==========================================
 
+@st.cache_resource
 def get_google_sheet():
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     if "gcp_service_account" in os.environ:
@@ -76,14 +78,14 @@ def get_google_sheet():
     sheet = client.open("Orbiloc_Warranty_Data").sheet1
     return sheet
 
-def send_notification_email(to_email, customer_name, shop_name, product_details):
-    # 從環境變數讀取帳密
+def send_email_background(to_email, customer_name, shop_name, product_details):
     gmail_user = os.environ.get("MAIL_USER")
     gmail_password = os.environ.get("MAIL_PASSWORD")
     bcc_email = os.environ.get("BCC_EMAIL")
 
     if not gmail_user or not gmail_password:
-        return False, "Render 環境變數 MAIL_USER 或 MAIL_PASSWORD 未設定"
+        print("❌ Email 設定缺失：請檢查 Render 環境變數")
+        return
 
     msg = MIMEMultipart()
     msg['From'] = f"Orbiloc Taiwan <{gmail_user}>"
@@ -119,16 +121,21 @@ def send_notification_email(to_email, customer_name, shop_name, product_details)
     msg.attach(MIMEText(body, 'plain'))
 
     try:
-        # [修正] 改用 Port 587 並啟動 TLS 加密，解決 Network unreachable 問題
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.ehlo()
-        server.starttls() # 啟動加密傳輸
+        print("📨 嘗試連線到 Gmail SMTP (Port 465)...")
+        # [修正] 改回 SMTP_SSL (Port 465)，這是應用程式密碼最穩定的方式
+        # 並加入 timeout 避免卡死
+        server = smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=30)
+        
+        print("🔐 登入中...")
         server.login(gmail_user, gmail_password)
+        
+        print("🚀 發送郵件中...")
         server.sendmail(gmail_user, recipients, msg.as_string())
         server.quit()
-        return True, "發送成功"
+        print(f"✅ Email 成功發送給 {to_email}")
+        
     except Exception as e:
-        return False, f"Email 發送失敗: {str(e)}"
+        print(f"❌ Email 發送失敗 (詳細錯誤): {str(e)}")
 
 try:
     sheet = get_google_sheet()
@@ -148,18 +155,13 @@ if menu == "消費者保固登錄":
         st.balloons()
         st.success("🎉 保固登錄成功！")
         
-        email_status = st.session_state.get('email_status', '')
-        if email_status and "失敗" in email_status:
-            st.error(f"⚠️ 資料已存檔，但確認信發送失敗。原因：{email_status}")
-        elif email_status and "未設定" in email_status:
-            st.warning("⚠️ 資料已存檔，但未設定 Email 帳號，故未發送確認信。")
+        # 由於是背景發送，這裡只顯示通用訊息
+        st.info("系統正在背景發送確認信至您的信箱，請稍候查收（若未收到請檢查垃圾郵件夾）。")
         
         st.markdown(f"""
         ### 您的資料已成功建檔
         
-        系統已發送一封確認信至您的 Email 信箱（若未收到請檢查垃圾郵件夾）。
-        
-        **【如何兌換免費維護？】** 請於方便的時間，攜帶您的外出燈前往 **{st.session_state.get('last_shop_name', '原購買通路')}**，
+        **【如何兌換免費維護？】** 請購買日後一年內，攜帶您的外出燈前往 **{st.session_state.get('last_shop_name', '原購買通路')}**，
         告知店員您的 **電話號碼** 即可進行核銷與維護。
         
         感謝您選擇 Orbiloc 守護毛孩的安全！
@@ -169,7 +171,6 @@ if menu == "消費者保固登錄":
         if st.button("回首頁 (登錄下一筆)"):
             st.session_state['form_submitted'] = False
             st.session_state['cart'] = []
-            st.session_state['email_status'] = ''
             st.rerun()
             
     else:
@@ -220,16 +221,20 @@ if menu == "消費者保固登錄":
 
         st.divider()
 
-        st.subheader("2. 填寫保固資訊（請正確填寫資料，以免影響保固資格")
+        st.subheader("2. 填寫保固資訊")
+        st.caption("請正確填寫資料，以免影響保固資格")
         
-        name = st.text_input("姓名")
-        phone = st.text_input("電話 (數字請連號輸入，勿輸入任何符號)", placeholder="09xxxxxxxx")
-        email = st.text_input("Email (將寄送確認信)", placeholder="example@email.com")
-        invoice = st.text_input("發票/收據/訂單編號")
-        shop_name = st.selectbox("購買通路名稱 (請務必正確選擇)", SHOP_LIST)
-        purchase_date = st.date_input("購買日期")
+        with st.form("final_submission_form"):
+            name = st.text_input("姓名")
+            phone = st.text_input("電話 (數字請連號輸入，勿輸入任何符號)", placeholder="09xxxxxxxx")
+            email = st.text_input("Email (將寄送確認信)", placeholder="example@email.com")
+            invoice = st.text_input("發票/收據/訂單編號")
+            shop_name = st.selectbox("購買通路名稱 (請務必正確選擇)", SHOP_LIST)
+            purchase_date = st.date_input("購買日期")
 
-        if st.button("送出保固登記", type="primary"):
+            submitted = st.form_submit_button("送出保固登記", type="primary")
+
+        if submitted:
             if not (name and phone and invoice and shop_name):
                 st.error("❌ 請填寫所有必填欄位 (姓名、電話、發票、通路)！")
             elif not st.session_state['cart']:
@@ -266,13 +271,13 @@ if menu == "消費者保固登錄":
                         ]
                         sheet.append_row(new_row)
                         
-                        email_msg = ""
+                        # 使用背景執行緒寄信
                         if email:
-                            with st.spinner("資料儲存成功，正在發送確認信..."):
-                                success, msg = send_notification_email(email, name, shop_name, product_detail_str)
-                                st.session_state['email_status'] = msg
-                        else:
-                            st.session_state['email_status'] = "未填寫Email"
+                            email_thread = threading.Thread(
+                                target=send_email_background, 
+                                args=(email, name, shop_name, product_detail_str)
+                            )
+                            email_thread.start()
                         
                         st.session_state['form_submitted'] = True
                         st.session_state['last_shop_name'] = shop_name 
