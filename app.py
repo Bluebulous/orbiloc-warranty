@@ -10,7 +10,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 # --- 設定頁面資訊 ---
-st.set_page_config(page_title="Orbiloc 守護者外出燈保固註冊系統", page_icon="🛡️", layout="centered")
+st.set_page_config(page_title="Orbiloc 守護者外出燈保固註冊系統", layout="centered")
 
 # --- 初始化 Session State ---
 if 'cart' not in st.session_state:
@@ -18,7 +18,7 @@ if 'cart' not in st.session_state:
 if 'form_submitted' not in st.session_state:
     st.session_state['form_submitted'] = False
 
-# [修正點 1] 初始化搜尋狀態，確保核銷時不會跳掉
+# [修正點 1] 初始化搜尋狀態
 if 'has_searched' not in st.session_state:
     st.session_state['has_searched'] = False
 if 'search_phone_number' not in st.session_state:
@@ -119,7 +119,10 @@ def send_notification_email(to_email, customer_name, shop_name, product_details)
     msg.attach(MIMEText(body, 'plain'))
 
     try:
-        server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
+        # [修正] 改用 Port 587 並啟動 TLS 加密，解決 Network unreachable 問題
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.ehlo()
+        server.starttls() # 啟動加密傳輸
         server.login(gmail_user, gmail_password)
         server.sendmail(gmail_user, recipients, msg.as_string())
         server.quit()
@@ -242,7 +245,6 @@ if menu == "消費者保固登錄":
                         df.columns = [c.strip() for c in df.columns]
                         if not df.empty and '電話' in df.columns and '發票' in df.columns:
                             df['clean_phone'] = df['電話'].astype(str).str.replace("'", "", regex=False).str.strip()
-                            # 補 0
                             df['clean_phone'] = df['clean_phone'].apply(lambda x: "0" + x if len(x) == 9 and x.isdigit() else x)
                             
                             input_phone = str(phone).strip()
@@ -311,18 +313,14 @@ elif menu == "店家核銷專區":
             st.subheader(f"📍 {login_shop} - 核銷作業")
             st.error("⚠️ 請詳細確認【發票／訂單號碼】以及【產品明細】是否吻合以進行核銷") 
             
-            # [修正點 2] 輸入框的值要與 Session State 綁定，防止重整後清空
             phone_input = st.text_input("輸入消費者電話", key="phone_input")
             
-            # [修正點 3] 按下搜尋按鈕時，更新狀態
             if st.button("搜尋資料"):
                 st.session_state['has_searched'] = True
                 st.session_state['search_phone_number'] = phone_input
             
-            # [修正點 4] 只要狀態是 True，就顯示搜尋結果 (不管剛才按的是搜尋還是核銷)
             if st.session_state['has_searched'] and st.session_state['search_phone_number']:
                 
-                # 重新抓取資料
                 data = sheet.get_all_records()
                 if not data:
                     st.warning("目前資料庫為空。")
@@ -333,11 +331,9 @@ elif menu == "店家核銷專區":
                     if '電話' not in df.columns:
                         st.error("資料庫格式錯誤：缺少「電話」欄位。")
                     else:
-                        # 清理與補0
                         df['clean_phone'] = df['電話'].astype(str).str.replace(r'\.0$', '', regex=True).str.replace("'", "", regex=False).str.strip()
                         df['clean_phone'] = df['clean_phone'].apply(lambda x: "0" + x if len(x) == 9 and x.isdigit() else x)
                         
-                        # 使用存起來的電話號碼來搜尋
                         input_phone = str(st.session_state['search_phone_number']).strip()
 
                         customers = df[
@@ -375,7 +371,6 @@ elif menu == "店家核銷專區":
                                                     sheet.update_cell(row_idx, 11, str(datetime.now().date()))
                                                     st.toast("✅ 核銷成功！資料已更新")
                                                     st.balloons()
-                                                    # 重整後，因為 has_searched 還是 True，所以會自動再次顯示已更新的資料
                                                     st.rerun()
                                                 except Exception as e:
                                                     st.error(f"核銷失敗：{e}")
