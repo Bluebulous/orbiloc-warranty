@@ -11,7 +11,7 @@ from email.mime.multipart import MIMEMultipart
 import threading
 
 # --- 設定頁面資訊 ---
-st.set_page_config(page_title="Orbiloc 守護者外出燈保固註冊系統", layout="centered")
+st.set_page_config(page_title="Orbiloc 守護者外出燈保固註冊系統", page_icon="🛡️", layout="centered")
 
 # --- 初始化 Session State ---
 if 'cart' not in st.session_state:
@@ -78,7 +78,7 @@ def get_google_sheet():
     sheet = client.open("Orbiloc_Warranty_Data").sheet1
     return sheet
 
-def send_email_background(to_email, customer_name, shop_name, product_details):
+def send_email_background(to_email, customer_name, shop_name, product_details, purchase_date):
     gmail_user = os.environ.get("MAIL_USER")
     gmail_password = os.environ.get("MAIL_PASSWORD")
     bcc_email = os.environ.get("BCC_EMAIL")
@@ -105,6 +105,7 @@ def send_email_background(to_email, customer_name, shop_name, product_details):
     --------------------------------------
     購買通路：{shop_name}
     登錄產品：{product_details}
+    購買日期：{purchase_date}
     登錄日期：{datetime.now().strftime('%Y-%m-%d')}
     --------------------------------------
 
@@ -122,8 +123,6 @@ def send_email_background(to_email, customer_name, shop_name, product_details):
 
     try:
         print("📨 嘗試連線到 Gmail SMTP (Port 465)...")
-        # [修正] 改回 SMTP_SSL (Port 465)，這是應用程式密碼最穩定的方式
-        # 並加入 timeout 避免卡死
         server = smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=30)
         
         print("🔐 登入中...")
@@ -155,13 +154,12 @@ if menu == "消費者保固登錄":
         st.balloons()
         st.success("🎉 保固登錄成功！")
         
-        # 由於是背景發送，這裡只顯示通用訊息
         st.info("系統正在背景發送確認信至您的信箱，請稍候查收（若未收到請檢查垃圾郵件夾）。")
         
         st.markdown(f"""
         ### 您的資料已成功建檔
         
-        **【如何兌換免費維護？】** 請購買日後一年內，攜帶您的外出燈前往 **{st.session_state.get('last_shop_name', '原購買通路')}**，
+        **【如何兌換免費維護？】** 請於方便的時間，攜帶您的外出燈前往 **{st.session_state.get('last_shop_name', '原購買通路')}**，
         告知店員您的 **電話號碼** 即可進行核銷與維護。
         
         感謝您選擇 Orbiloc 守護毛孩的安全！
@@ -180,8 +178,8 @@ if menu == "消費者保固登錄":
         ### 【三年原廠保固】
         凡購買 Orbiloc 守護者外出燈，在正常使用下（排除人為因素、寵物啃咬及不當拆解），我們提供長達三年的安心保固服務。
 
-        ### 【2026年1/1開始，登錄享好禮：免費外出燈維護】
-        完成線上保固登錄，即加贈 **「原廠電池＆防水圈維護服務」** 乙次。
+        ### 【登錄享好禮：免費電池維護】
+        立即掃描 QR Code 完成線上保固登錄，即加贈 **「原廠電池＆防水圈維護服務」** 乙次。
         
         **兌換方式：** 在購買日起算一年內，請攜帶您的 Orbiloc 外出燈親臨原購買通路，提供「保固登錄之電話號碼」供門市人員查詢確認後，即可現場免費兌換維護。
         
@@ -241,10 +239,12 @@ if menu == "消費者保固登錄":
                 st.error("❌ 購買清單為空，請先在上方加入商品！")
             else:
                 try:
-                    product_detail_str = ", ".join(st.session_state['cart'])
-                    data = sheet.get_all_records()
+                    # 這是給 Email 看的合併清單 (例如: "紅色 x2, 藍色 x1")
+                    product_detail_str_for_email = ", ".join(st.session_state['cart'])
                     
+                    data = sheet.get_all_records()
                     is_duplicate = False
+                    
                     if data:
                         df = pd.DataFrame(data)
                         df.columns = [c.strip() for c in df.columns]
@@ -264,18 +264,33 @@ if menu == "消費者保固登錄":
                     if is_duplicate:
                         st.warning("⚠️ 此發票號碼與電話已登記過，請勿重複送出。")
                     else:
-                        new_row = [
-                            name, str(phone), email, invoice, shop_name, 
-                            product_detail_str, str(purchase_date), 
-                            str(datetime.now().date()), "No", "", ""
-                        ]
-                        sheet.append_row(new_row)
+                        # ===== 核心修正：拆分購物車，多筆寫入 =====
+                        rows_to_insert = []
                         
-                        # 使用背景執行緒寄信
+                        for item in st.session_state['cart']:
+                            # item 格式為 "Orbiloc 守護者外出燈 (紅色) x2"
+                            # 用 rsplit 從右邊切開一次，分離產品名稱與數量
+                            prod_name, qty_str = item.rsplit(' x', 1)
+                            qty = int(qty_str)
+                            
+                            # 依據數量，迴圈建立多筆資料 (每筆數量都是 x1)
+                            for _ in range(qty):
+                                new_row = [
+                                    name, str(phone), email, invoice, shop_name, 
+                                    f"{prod_name} x1", # 強制標示為 1 個
+                                    str(purchase_date), 
+                                    str(datetime.now().date()), "No", "", ""
+                                ]
+                                rows_to_insert.append(new_row)
+                        
+                        # 一次性將所有拆分後的商品寫入 Google Sheet
+                        sheet.append_rows(rows_to_insert)
+                        # ========================================
+
                         if email:
                             email_thread = threading.Thread(
                                 target=send_email_background, 
-                                args=(email, name, shop_name, product_detail_str)
+                                args=(email, name, shop_name, product_detail_str_for_email, str(purchase_date))
                             )
                             email_thread.start()
                         
@@ -353,14 +368,14 @@ elif menu == "店家核銷專區":
                             else:
                                  st.error("查無此電話號碼。")
                         else:
-                            st.success(f"✅ 找到 {len(customers)} 筆資料")
+                            st.success(f"✅ 找到 {len(customers)} 筆可核銷商品 (已自動拆分顯示)")
                             
                             for index, record in customers.iterrows():
                                 with st.container():
                                     st.markdown("---")
                                     c1, c2 = st.columns([3, 1])
                                     with c1:
-                                        st.write(f"**購買品項：** {record['購買品項及數量']}")
+                                        st.write(f"**產品：** {record['購買品項及數量']}")
                                         st.caption(f"姓名：{record['姓名']} | 購買日：{record['購買日期']} | 發票：{record.get('發票', '未填寫')}")
                                     with c2:
                                         status = record['是否已兌換']
@@ -404,6 +419,6 @@ elif menu == "店家核銷專區":
                             display_cols = ['姓名', '電話', '發票', '購買品項及數量', '購買日期', '是否已兌換', '兌換日']
                             final_cols = [c for c in display_cols if c in my_shop_data.columns]
                             st.dataframe(my_shop_data[final_cols])
-                            st.caption(f"共 {len(my_shop_data)} 筆資料")
+                            st.caption(f"共 {len(my_shop_data)} 筆商品資料")
                     else:
                         st.error("資料庫讀取錯誤：缺少「電話」或「購買通路名稱」欄位。")
