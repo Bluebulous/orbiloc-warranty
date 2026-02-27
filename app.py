@@ -239,41 +239,34 @@ if menu == "消費者保固登錄":
                 st.error("❌ 購買清單為空，請先在上方加入商品！")
             else:
                 try:
-                    # 這是給 Email 看的合併清單 (例如: "紅色 x2, 藍色 x1")
                     product_detail_str_for_email = ", ".join(st.session_state['cart'])
                     
                     data = sheet.get_all_records()
                     is_duplicate = False
                     
+                    # ===== 修改重點：嚴格檢查「發票/訂單號碼」 =====
                     if data:
                         df = pd.DataFrame(data)
                         df.columns = [c.strip() for c in df.columns]
-                        if not df.empty and '電話' in df.columns and '發票' in df.columns:
-                            df['clean_phone'] = df['電話'].astype(str).str.replace("'", "", regex=False).str.strip()
-                            df['clean_phone'] = df['clean_phone'].apply(lambda x: "0" + x if len(x) == 9 and x.isdigit() else x)
+                        if not df.empty and '發票' in df.columns:
+                            input_invoice = str(invoice).strip()
                             
-                            input_phone = str(phone).strip()
+                            # 只要發票欄位裡有一模一樣的號碼，就視為重複！(不再管電話是不是同一個)
+                            duplicate_check = df[df['發票'].astype(str).str.strip() == input_invoice]
                             
-                            duplicate_check = df[
-                                (df['clean_phone'] == input_phone) & 
-                                (df['發票'].astype(str) == str(invoice))
-                            ]
                             if not duplicate_check.empty:
                                 is_duplicate = True
+                    # ==========================================
 
                     if is_duplicate:
-                        st.warning("⚠️ 此發票號碼與電話已登記過，請勿重複送出。")
+                        st.warning(f"⚠️ 發票/訂單號碼「{invoice}」已登記過，請勿重複送出！如有疑問請洽客服。")
                     else:
-                        # ===== 核心修正：拆分購物車，多筆寫入 =====
+                        # 拆分購物車，多筆寫入 (支援單顆核銷)
                         rows_to_insert = []
-                        
                         for item in st.session_state['cart']:
-                            # item 格式為 "Orbiloc 守護者外出燈 (紅色) x2"
-                            # 用 rsplit 從右邊切開一次，分離產品名稱與數量
                             prod_name, qty_str = item.rsplit(' x', 1)
                             qty = int(qty_str)
                             
-                            # 依據數量，迴圈建立多筆資料 (每筆數量都是 x1)
                             for _ in range(qty):
                                 new_row = [
                                     name, str(phone), email, invoice, shop_name, 
@@ -283,9 +276,7 @@ if menu == "消費者保固登錄":
                                 ]
                                 rows_to_insert.append(new_row)
                         
-                        # 一次性將所有拆分後的商品寫入 Google Sheet
                         sheet.append_rows(rows_to_insert)
-                        # ========================================
 
                         if email:
                             email_thread = threading.Thread(
