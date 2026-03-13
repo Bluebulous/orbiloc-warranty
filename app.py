@@ -174,11 +174,12 @@ if menu == "消費者保固登錄":
     else:
         st.title("守護者外出燈保固登錄")
         
+        # ===== 這裡就是修改過文字的地方 =====
         st.markdown("""
         ### 【三年原廠保固】
         凡購買 Orbiloc 守護者外出燈，在正常使用下（排除人為因素、寵物啃咬及不當拆解），我們提供長達三年的安心保固服務。
 
-        ### 【登錄享好禮：免費電池維護】
+        ### 【2026年1/1起購買，登錄享好禮：免費電池維護】
         立即掃描 QR Code 完成線上保固登錄，即加贈 **「原廠電池＆防水圈維護服務」** 乙次。
         
         **兌換方式：** 在購買日起算一年內，請攜帶您的 Orbiloc 外出燈親臨原購買通路，提供「保固登錄之電話號碼」供門市人員查詢確認後，即可現場免費兌換維護。
@@ -186,6 +187,7 @@ if menu == "消費者保固登錄":
         **貼心提醒：** 本服務採現場更換耗材制，恕不提供寄送服務，亦不可跨通路兌換*。  
         <small>*若原通路已停業或有其他特殊狀況，請洽總代理 LINE 客服 @bluebulous，我們將協助引導您至其他服務據點。</small>
         """, unsafe_allow_html=True)
+        # ====================================
         
         st.divider()
 
@@ -244,24 +246,20 @@ if menu == "消費者保固登錄":
                     data = sheet.get_all_records()
                     is_duplicate = False
                     
-                    # ===== 修改重點：嚴格檢查「發票/訂單號碼」 =====
                     if data:
                         df = pd.DataFrame(data)
                         df.columns = [c.strip() for c in df.columns]
                         if not df.empty and '發票' in df.columns:
                             input_invoice = str(invoice).strip()
                             
-                            # 只要發票欄位裡有一模一樣的號碼，就視為重複！(不再管電話是不是同一個)
                             duplicate_check = df[df['發票'].astype(str).str.strip() == input_invoice]
                             
                             if not duplicate_check.empty:
                                 is_duplicate = True
-                    # ==========================================
 
                     if is_duplicate:
                         st.warning(f"⚠️ 發票/訂單號碼「{invoice}」已登記過，請勿重複送出！如有疑問請洽客服。")
                     else:
-                        # 拆分購物車，多筆寫入 (支援單顆核銷)
                         rows_to_insert = []
                         for item in st.session_state['cart']:
                             prod_name, qty_str = item.rsplit(' x', 1)
@@ -270,7 +268,7 @@ if menu == "消費者保固登錄":
                             for _ in range(qty):
                                 new_row = [
                                     name, str(phone), email, invoice, shop_name, 
-                                    f"{prod_name} x1", # 強制標示為 1 個
+                                    f"{prod_name} x1", 
                                     str(purchase_date), 
                                     str(datetime.now().date()), "No", "", ""
                                 ]
