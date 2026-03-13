@@ -13,6 +13,14 @@ import threading
 # --- 設定頁面資訊 ---
 st.set_page_config(page_title="Orbiloc 守護者外出燈保固註冊系統", page_icon="🛡️", layout="centered")
 
+# --- 隱藏右上角預設的 Streamlit 選單與底部的浮水印 (讓畫面更像獨立 APP) ---
+st.markdown("""
+<style>
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+</style>
+""", unsafe_allow_html=True)
+
 # --- 初始化 Session State ---
 if 'cart' not in st.session_state:
     st.session_state['cart'] = []
@@ -174,7 +182,6 @@ if menu == "消費者保固登錄":
     else:
         st.title("守護者外出燈保固登錄")
         
-        # ===== 這裡就是修改過文字的地方 =====
         st.markdown("""
         ### 【三年原廠保固】
         凡購買 Orbiloc 守護者外出燈，在正常使用下（排除人為因素、寵物啃咬及不當拆解），我們提供長達三年的安心保固服務。
@@ -187,7 +194,6 @@ if menu == "消費者保固登錄":
         **貼心提醒：** 本服務採現場更換耗材制，恕不提供寄送服務，亦不可跨通路兌換*。  
         <small>*若原通路已停業或有其他特殊狀況，請洽總代理 LINE 客服 @bluebulous，我們將協助引導您至其他服務據點。</small>
         """, unsafe_allow_html=True)
-        # ====================================
         
         st.divider()
 
@@ -222,7 +228,9 @@ if menu == "消費者保固登錄":
         st.divider()
 
         st.subheader("2. 填寫保固資訊")
-        st.caption("請正確填寫資料，以免影響保固資格")
+        # ===== 這裡加上了您要求的聲明文字 =====
+        st.caption("⚠️ 請務必確實填寫正確資料。若經查證填寫錯誤或與實際購買紀錄不符，原購買通路將保留拒絕提供免費維護福利之權利。")
+        # =====================================
         
         with st.form("final_submission_form"):
             name = st.text_input("姓名")
